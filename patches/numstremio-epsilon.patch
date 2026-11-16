@@ -1,0 +1,1803 @@
+diff --git a/epsilon/apps/numstremio/Makefile b/epsilon/apps/numstremio/Makefile
+new file mode 100644
+index 0000000000..ac33c66341
+--- /dev/null
++++ b/epsilon/apps/numstremio/Makefile
+@@ -0,0 +1,9 @@
++SOURCES_apps += $(addprefix $(PATH_apps)/numstremio/,$(addsuffix :-test, \
++  app.cpp \
++  stremio_controller.cpp \
++  numstremio_icon.png \
++))
++
++$(call depends_on_image,$(PATH_apps)/numstremio/app.cpp,$(PATH_apps)/numstremio/numstremio_icon.png)
++
++$(call i18n_with_universal,numstremio/i18n/base)
+diff --git a/epsilon/apps/numstremio/app.cpp b/epsilon/apps/numstremio/app.cpp
+new file mode 100644
+index 0000000000..79ece8a406
+--- /dev/null
++++ b/epsilon/apps/numstremio/app.cpp
+@@ -0,0 +1,35 @@
++#include "app.h"
++
++#include <escher/container.h>
++#include <ion/events.h>
++
++#include "numstremio_icon.h"
++
++namespace Numstremio {
++
++const Escher::Image* App::Descriptor::icon() const {
++  return ImageStore::NumstremioIcon;
++}
++
++App* App::Snapshot::unpack(Escher::Container* container) {
++  return new (container->currentAppBuffer()) App(this);
++}
++
++const App::Descriptor* App::Snapshot::descriptor() const {
++  constexpr static Descriptor s_descriptor;
++  return &s_descriptor;
++}
++
++App::App(Snapshot* snapshot)
++    : Escher::App(snapshot, &m_controller),
++      m_controller(&m_modalViewController),
++      m_usbTimer(&m_controller) {}
++
++void App::willBecomeInactive() {
++  // Give the USB port back, and leave the keyboard as we found it.
++  m_controller.disconnect();
++  Ion::Events::setShiftAlphaStatus(Ion::Events::ShiftAlphaStatus());
++  Escher::App::willBecomeInactive();
++}
++
++}  // namespace Numstremio
+diff --git a/epsilon/apps/numstremio/app.h b/epsilon/apps/numstremio/app.h
+new file mode 100644
+index 0000000000..23853ab3e1
+--- /dev/null
++++ b/epsilon/apps/numstremio/app.h
+@@ -0,0 +1,51 @@
++#pragma once
++
++#include <apps/i18n.h>
++#include <escher/app.h>
++
++#include "stremio_controller.h"
++
++namespace Numstremio {
++
++class App : public Escher::App {
++ public:
++  class Descriptor : public Escher::App::Descriptor {
++   public:
++    I18n::Message name() const override { return I18n::Message::NumstremioApp; }
++    I18n::Message upperName() const override {
++      return I18n::Message::NumstremioAppCapital;
++    }
++    const Escher::Image* icon() const override;
++  };
++
++  class Snapshot : public Escher::App::Snapshot {
++   public:
++    App* unpack(Escher::Container* container) override;
++    const Descriptor* descriptor() const override;
++  };
++
++  void willBecomeInactive() override;
++  int numberOfTimers() override { return 1; }
++  Escher::Timer* timerAtIndex(int i) override { return &m_usbTimer; }
++
++ private:
++  // Opens the session once the app is on screen.
++  class UsbTimer : public Escher::Timer {
++   public:
++    explicit UsbTimer(StremioController* controller)
++        : Escher::Timer(1), m_controller(controller) {}
++
++   private:
++    bool fire() override {
++      m_controller->tick();
++      return false;
++    }
++    StremioController* m_controller;
++  };
++
++  App(Snapshot* snapshot);
++  StremioController m_controller;
++  UsbTimer m_usbTimer;
++};
++
++}  // namespace Numstremio
+diff --git a/epsilon/apps/numstremio/host_model_test.cpp b/epsilon/apps/numstremio/host_model_test.cpp
+new file mode 100644
+index 0000000000..e4b8783931
+--- /dev/null
++++ b/epsilon/apps/numstremio/host_model_test.cpp
+@@ -0,0 +1,70 @@
++// Host test of model.h:  g++ -std=c++17 -Wall -Wextra -o /tmp/m host_model_test.cpp && /tmp/m
++#include <assert.h>
++#include <stdio.h>
++
++#include "model.h"
++
++using namespace Numstremio;
++
++int main() {
++  {  // Reader: good frame
++    const uint8_t frame[] = {2, 1, 3, 'a', 'b', 'c', 4, 0xC3, 0xA9, 'x', 'y'};
++    Reader r(frame, sizeof(frame));
++    assert(r.u8() == 2);
++    assert(r.u8() == 1);
++    char s[8];
++    assert(r.str8(s, sizeof(s)) && !strcmp(s, "abc"));
++    assert(r.str8(s, sizeof(s)) && r.ok() && r.remaining() == 0);
++  }
++  {  // Reader: truncated string fails and stays failed
++    const uint8_t frame[] = {5, 'a', 'b'};
++    Reader r(frame, sizeof(frame));
++    char s[8];
++    assert(!r.str8(s, sizeof(s)));
++    assert(!r.ok());
++    assert(r.u8() == 0 && !r.ok());
++  }
++  {  // Reader: string longer than the buffer is cut on a character boundary
++    const uint8_t frame[] = {5, 'a', 0xC3, 0xA9, 'b', 'c'};
++    Reader r(frame, sizeof(frame));
++    char s[3];  // room for 2 bytes
++    assert(r.str8(s, sizeof(s)));
++    assert(!strcmp(s, "a"));  // the 2-byte "e acute" would be cut in half
++    assert(r.ok() && r.remaining() == 0);
++  }
++  {  // u16 little endian
++    const uint8_t frame[] = {0x34, 0x12};
++    Reader r(frame, 2);
++    assert(r.u16() == 0x1234);
++  }
++  {  // Cursor scrolling
++    Cursor c(4);
++    c.reset(6);
++    assert(!c.move(-1));
++    for (int i = 0; i < 5; i++) assert(c.move(1));
++    assert(c.selection() == 5 && c.first() == 2);
++    assert(!c.move(1));
++    for (int i = 0; i < 5; i++) assert(c.move(-1));
++    assert(c.selection() == 0 && c.first() == 0);
++    c.reset(0);
++    assert(!c.move(1) && !c.move(-1));
++    c.reset(6);
++    c.select(99);
++    assert(c.selection() == 5 && c.first() == 2);
++  }
++  assert(cycle(0, -1, 3) == 2 && cycle(2, 1, 3) == 0 && cycle(0, 1, 0) == 0);
++  {  // clip
++    char out[40];
++    clip(out, sizeof(out), "Short", 10);
++    assert(!strcmp(out, "Short"));
++    clip(out, sizeof(out), "The Lord of the Rings", 10);
++    assert(!strcmp(out, "The Lor..."));
++    clip(out, sizeof(out), "\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9\xC3\xA9", 4);
++    assert(!strcmp(out, "\xC3\xA9..."));
++    char tiny[6];
++    clip(tiny, sizeof(tiny), "abcdefghij", 20);
++    assert(strlen(tiny) <= 5);
++  }
++  puts("model: ok");
++  return 0;
++}
+diff --git a/epsilon/apps/numstremio/i18n/base.de.i18n b/epsilon/apps/numstremio/i18n/base.de.i18n
+new file mode 100644
+index 0000000000..2e222abfa3
+--- /dev/null
++++ b/epsilon/apps/numstremio/i18n/base.de.i18n
+@@ -0,0 +1 @@
++# NumStremio has no translated strings; see base.universal.i18n.
+diff --git a/epsilon/apps/numstremio/i18n/base.en.i18n b/epsilon/apps/numstremio/i18n/base.en.i18n
+new file mode 100644
+index 0000000000..2e222abfa3
+--- /dev/null
++++ b/epsilon/apps/numstremio/i18n/base.en.i18n
+@@ -0,0 +1 @@
++# NumStremio has no translated strings; see base.universal.i18n.
+diff --git a/epsilon/apps/numstremio/i18n/base.es.i18n b/epsilon/apps/numstremio/i18n/base.es.i18n
+new file mode 100644
+index 0000000000..2e222abfa3
+--- /dev/null
++++ b/epsilon/apps/numstremio/i18n/base.es.i18n
+@@ -0,0 +1 @@
++# NumStremio has no translated strings; see base.universal.i18n.
+diff --git a/epsilon/apps/numstremio/i18n/base.fr.i18n b/epsilon/apps/numstremio/i18n/base.fr.i18n
+new file mode 100644
+index 0000000000..2e222abfa3
+--- /dev/null
++++ b/epsilon/apps/numstremio/i18n/base.fr.i18n
+@@ -0,0 +1 @@
++# NumStremio has no translated strings; see base.universal.i18n.
+diff --git a/epsilon/apps/numstremio/i18n/base.it.i18n b/epsilon/apps/numstremio/i18n/base.it.i18n
+new file mode 100644
+index 0000000000..2e222abfa3
+--- /dev/null
++++ b/epsilon/apps/numstremio/i18n/base.it.i18n
+@@ -0,0 +1 @@
++# NumStremio has no translated strings; see base.universal.i18n.
+diff --git a/epsilon/apps/numstremio/i18n/base.nl.i18n b/epsilon/apps/numstremio/i18n/base.nl.i18n
+new file mode 100644
+index 0000000000..2e222abfa3
+--- /dev/null
++++ b/epsilon/apps/numstremio/i18n/base.nl.i18n
+@@ -0,0 +1 @@
++# NumStremio has no translated strings; see base.universal.i18n.
+diff --git a/epsilon/apps/numstremio/i18n/base.pt.i18n b/epsilon/apps/numstremio/i18n/base.pt.i18n
+new file mode 100644
+index 0000000000..2e222abfa3
+--- /dev/null
++++ b/epsilon/apps/numstremio/i18n/base.pt.i18n
+@@ -0,0 +1 @@
++# NumStremio has no translated strings; see base.universal.i18n.
+diff --git a/epsilon/apps/numstremio/i18n/base.universal.i18n b/epsilon/apps/numstremio/i18n/base.universal.i18n
+new file mode 100644
+index 0000000000..09f90f090b
+--- /dev/null
++++ b/epsilon/apps/numstremio/i18n/base.universal.i18n
+@@ -0,0 +1,2 @@
++NumstremioApp = "NumStremio"
++NumstremioAppCapital = "NUMSTREMIO"
+diff --git a/epsilon/apps/numstremio/model.h b/epsilon/apps/numstremio/model.h
+new file mode 100644
+index 0000000000..230dbde2b2
+--- /dev/null
++++ b/epsilon/apps/numstremio/model.h
+@@ -0,0 +1,147 @@
++#pragma once
++
++#include <stddef.h>
++#include <stdint.h>
++#include <string.h>
++
++// Pure logic of NumStremio (no Escher, no Ion): frame parsing and list
++// navigation. It builds on the host too (tests/host_model_test.cpp).
++namespace Numstremio {
++
++// Bounds-checked reader of a frame payload. Every read fails (and stays
++// failed) instead of running past the end: frames come from a PC program.
++class Reader {
++ public:
++  Reader(const uint8_t* data, size_t length) : m_data(data), m_length(length), m_cursor(0), m_ok(true) {}
++  bool ok() const { return m_ok; }
++  size_t remaining() const { return m_length - m_cursor; }
++  const uint8_t* position() const { return m_data + m_cursor; }
++
++  uint8_t u8() {
++    if (!m_ok || m_cursor + 1 > m_length) {
++      m_ok = false;
++      return 0;
++    }
++    return m_data[m_cursor++];
++  }
++  uint16_t u16() {
++    const uint8_t low = u8();
++    const uint8_t high = u8();
++    return static_cast<uint16_t>(low | (high << 8));
++  }
++  // str8 into destination (always 0-terminated, cut on a character boundary).
++  bool str8(char* destination, size_t capacity) {
++    const size_t size = u8();
++    if (!m_ok || m_cursor + size > m_length || capacity == 0) {
++      m_ok = false;
++      return false;
++    }
++    size_t count = size < capacity - 1 ? size : capacity - 1;
++    while (count > 0 && count < size && (static_cast<uint8_t>(m_data[m_cursor + count]) & 0xC0) == 0x80) {
++      count--;
++    }
++    memcpy(destination, m_data + m_cursor, count);
++    destination[count] = '\0';
++    m_cursor += size;
++    return true;
++  }
++
++ private:
++  const uint8_t* m_data;
++  size_t m_length;
++  size_t m_cursor;
++  bool m_ok;
++};
++
++// Selection in a list taller than the screen.
++class Cursor {
++ public:
++  explicit Cursor(int visible) : m_visible(visible), m_count(0), m_selection(0), m_first(0) {}
++  void reset(int count) {
++    m_count = count < 0 ? 0 : count;
++    m_selection = m_first = 0;
++  }
++  int count() const { return m_count; }
++  int selection() const { return m_selection; }
++  int first() const { return m_first; }
++  int visible() const { return m_visible; }
++  // Returns true when the selection moved (false at either end).
++  bool move(int delta) {
++    const int next = m_selection + delta;
++    if (next < 0 || next >= m_count) {
++      return false;
++    }
++    m_selection = next;
++    if (m_selection < m_first) {
++      m_first = m_selection;
++    } else if (m_selection >= m_first + m_visible) {
++      m_first = m_selection - m_visible + 1;
++    }
++    return true;
++  }
++  void select(int index) {
++    m_selection = index < 0 ? 0 : (index >= m_count ? (m_count > 0 ? m_count - 1 : 0) : index);
++    m_first = m_selection >= m_visible ? m_selection - m_visible + 1 : 0;
++  }
++
++ private:
++  int m_visible;
++  int m_count;
++  int m_selection;
++  int m_first;
++};
++
++// Cycles 0..count-1 (count 0 stays 0).
++inline int cycle(int value, int delta, int count) {
++  if (count <= 0) {
++    return 0;
++  }
++  return ((value + delta) % count + count) % count;
++}
++
++// Copies at most `glyphs` characters (combining accents take no room), adding
++// "..." when cut. Returns the number of bytes written (without the final 0).
++inline size_t clip(char* destination, size_t capacity, const char* text, int glyphs) {
++  size_t out = 0;
++  int shown = 0;
++  size_t i = 0;
++  const size_t length = strlen(text);
++  while (i < length) {
++    size_t j = i + 1;
++    while (j < length && (static_cast<uint8_t>(text[j]) & 0xC0) == 0x80) {
++      j++;
++    }
++    const uint8_t lead = static_cast<uint8_t>(text[i]);
++    const bool combining = lead == 0xCC || lead == 0xCD;
++    if (!combining) {
++      if (shown == glyphs) {
++        // Too long: replace the end by "...".
++        int back = 0;
++        while (out > 0 && back < 3) {
++          out--;
++          while (out > 0 && (static_cast<uint8_t>(destination[out]) & 0xC0) == 0x80) {
++            out--;
++          }
++          back++;
++        }
++        if (out + 4 <= capacity) {
++          memcpy(destination + out, "...", 3);
++          out += 3;
++        }
++        destination[out] = '\0';
++        return out;
++      }
++      shown++;
++    }
++    if (out + (j - i) + 1 > capacity) {
++      break;
++    }
++    memcpy(destination + out, text + i, j - i);
++    out += j - i;
++    i = j;
++  }
++  destination[out] = '\0';
++  return out;
++}
++
++}  // namespace Numstremio
+diff --git a/epsilon/apps/numstremio/numstremio_icon.png b/epsilon/apps/numstremio/numstremio_icon.png
+new file mode 100644
+index 0000000000000000000000000000000000000000..1613357d1784257324d87225539f6e52ce1e1eb7
+GIT binary patch
+literal 2889
+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
+
+literal 0
+HcmV?d00001
+
+diff --git a/epsilon/apps/numstremio/protocol.h b/epsilon/apps/numstremio/protocol.h
+new file mode 100644
+index 0000000000..b4ab7cd9d5
+--- /dev/null
++++ b/epsilon/apps/numstremio/protocol.h
+@@ -0,0 +1,37 @@
++#pragma once
++
++#include <stdint.h>
++
++// Frame types of NumStremio, carried in TMIA frames (see apps/numtube/link.h).
++// Keep in sync with gateway/numstremio_service.py. Errors use Numtube's 0x07.
++// Strings are "str8": one length byte, then UTF-8 (accents decomposed).
++namespace Numstremio {
++namespace Protocol {
++
++enum Type : uint8_t {
++  Error = 0x07,
++  Start = 0xB0,        // calc -> PC
++  Config = 0xB1,       // PC -> calc: u8 n, n * str8 genre
++  Browse = 0xB2,       // calc -> PC: u8 kind (0 all, 1 movie, 2 series), u8 genre (0 = all, else 1-based), u16 page, query
++  Item = 0xB3,         // PC -> calc: u8 slot, u8 kind, str8 id, str8 title, str8 info
++  ListDone = 0xB4,     // PC -> calc: u8 count, u8 more, u16 page
++  Open = 0xB5,         // calc -> PC: u8 kind, str8 id
++  Detail = 0xB6,       // PC -> calc: u8 kind, str8 title, str8 info, u8 n, n * u8 season
++  Episode = 0xB7,      // PC -> calc: u16 number, str8 title
++  Season = 0xB8,       // calc -> PC: u8 season
++  EpisodesDone = 0xB9, // PC -> calc: u8 season, u8 count
++  Streams = 0xBA,      // calc -> PC: u8 season (255: none), u16 episode
++  Providers = 0xBB,    // PC -> calc: u8 n, n * str8 name
++  Stream = 0xBC,       // PC -> calc: u8 index, u8 provider (1-based), str8 line 1, str8 line 2
++  StreamsDone = 0xBD,  // PC -> calc: u8 count
++  SubLangs = 0xBE,     // PC -> calc: u8 n, n * str8 label
++  Poster = 0xBF,       // PC -> calc: u8 slot, u8 w, u8 h, RGB565 little endian
++};
++
++constexpr uint8_t k_noSeason = 255;
++constexpr int k_pageSize = 6;
++constexpr int k_posterWidth = 28;
++constexpr int k_posterHeight = 42;
++
++}  // namespace Protocol
++}  // namespace Numstremio
+diff --git a/epsilon/apps/numstremio/stremio_controller.cpp b/epsilon/apps/numstremio/stremio_controller.cpp
+new file mode 100644
+index 0000000000..2c6e81845d
+--- /dev/null
++++ b/epsilon/apps/numstremio/stremio_controller.cpp
+@@ -0,0 +1,1127 @@
++#include "stremio_controller.h"
++
++#include <apps/apps_container.h>
++#include <ion/display.h>
++#include <ion/keyboard.h>
++#include <ion/timing.h>
++#include <ion/usb.h>
++#include <string.h>
++
++namespace Numstremio {
++
++using Ion::Keyboard::Key;
++
++namespace {
++
++constexpr KDColor k_background = KDColor::RGB24(0x12101F);
++constexpr KDColor k_panel = KDColor::RGB24(0x221F3A);
++constexpr KDColor k_selected = KDColor::RGB24(0x3A3566);
++constexpr KDColor k_text = KDColorWhite;
++constexpr KDColor k_muted = KDColor::RGB24(0xA29FC0);
++constexpr KDColor k_accent = KDColor::RGB24(0x8B6CF7);
++constexpr KDColor k_warning = KDColor::RGB24(0xFFB734);
++
++constexpr KDFont::Size k_font = KDFont::Size::Small;
++constexpr int k_width = 320;
++constexpr int k_height = 240;
++constexpr int k_rowHeight = 20;
++constexpr int k_titleRowHeight = 48;
++constexpr int k_listTop = 28;
++constexpr uint32_t k_detailTimeoutMs = 45000;
++constexpr uint32_t k_streamsTimeoutMs = 70000;
++constexpr uint32_t k_listTimeoutMs = 30000;
++
++bool isExitKey(Key key) { return key == Key::Home || key == Key::OnOff; }
++
++uint32_t bit(uint8_t type) { return type >= 0xB0 && type < 0xD0 ? 1u << (type - 0xB0) : 0; }
++
++KDContext* screenContext() {
++  KDContext* context = Ion::Display::Context::SharedContext;
++  context->setOrigin(KDPointZero);
++  context->setClippingRect(KDRect(0, 0, Ion::Display::Width, Ion::Display::Height));
++  return context;
++}
++
++int glyphWidth() { return KDFont::GlyphMaxWidth(k_font); }
++int glyphHeight() { return KDFont::GlyphHeight(k_font); }
++
++// Draws `text` cut to `widthPx`, ending with "..." when too long.
++void drawText(KDContext* ctx, int x, int y, const char* text, KDColor color,
++              KDColor background, int widthPx) {
++  char buffer[80];
++  int glyphs = widthPx / glyphWidth();
++  if (glyphs < 1) {
++    return;
++  }
++  clip(buffer, sizeof(buffer), text, glyphs);
++  ctx->drawString(buffer, KDPoint(x, y), KDGlyph::Style{color, background, k_font});
++}
++
++void drawCentered(KDContext* ctx, const char* text, int y, KDColor color,
++                  KDColor background, KDFont::Size font = k_font) {
++  const int width = KDFont::GlyphMaxWidth(font);
++  const int height = KDFont::GlyphHeight(font);
++  const KDGlyph::Style style{color, background, font};
++  while (*text != '\0') {
++    const char* end = strchr(text, '\n');
++    const size_t bytes = end ? static_cast<size_t>(end - text) : strlen(text);
++    int glyphs = 0;
++    for (size_t i = 0; i < bytes; i++) {
++      const uint8_t byte = static_cast<uint8_t>(text[i]);
++      if ((byte & 0xC0) != 0x80 && byte != 0xCC && byte != 0xCD) {
++        glyphs++;
++      }
++    }
++    const int x = (k_width - glyphs * width) / 2;
++    ctx->drawString(text, KDPoint(x < 0 ? 0 : x, y), style, static_cast<int>(bytes));
++    y += height + 2;
++    text += bytes;
++    if (*text == '\n') {
++      text++;
++    }
++  }
++}
++
++// Last `glyphs` characters of the text (typing is easier to follow that way).
++const char* tail(const char* text, int glyphs) {
++  int count = 0;
++  for (const char* c = text; *c != '\0'; c++) {
++    const uint8_t byte = static_cast<uint8_t>(*c);
++    if ((byte & 0xC0) != 0x80 && byte != 0xCC && byte != 0xCD) {
++      count++;
++    }
++  }
++  const char* start = text;
++  while (count > glyphs && *start != '\0') {
++    start++;
++    while (*start != '\0' &&
++           (((static_cast<uint8_t>(*start) & 0xC0) == 0x80) ||
++            static_cast<uint8_t>(*start) == 0xCC || static_cast<uint8_t>(*start) == 0xCD)) {
++      start++;
++    }
++    count--;
++  }
++  return start;
++}
++
++// Appends `text` to `destination` (capacity bytes in all), never overflowing.
++void append(char* destination, size_t capacity, const char* text) {
++  const size_t used = strlen(destination);
++  if (used + 1 >= capacity) {
++    return;
++  }
++  size_t count = strlen(text);
++  if (count > capacity - used - 1) {
++    count = capacity - used - 1;
++  }
++  memcpy(destination + used, text, count);
++  destination[used + count] = '\0';
++}
++
++void number(char* out, int value) {  // small non-negative integers
++  char digits[6];
++  int n = 0;
++  do {
++    digits[n++] = static_cast<char>('0' + value % 10);
++    value /= 10;
++  } while (value > 0 && n < 5);
++  while (n > 0) {
++    *out++ = digits[--n];
++  }
++  *out = '\0';
++}
++
++}  // namespace
++
++// --- Start view -------------------------------------------------------------
++
++void StartView::drawRect(KDContext* ctx, KDRect rect) const {
++  ctx->fillRect(bounds(), k_background);
++  drawCentered(ctx, "NumStremio", 18, k_accent, k_background, KDFont::Size::Large);
++  const char* message = m_controller->message();
++  if (message[0] != '\0') {
++    drawCentered(ctx, message, 70, k_text, k_background);
++    drawCentered(ctx, "OK : relancer", 190, k_accent, k_background);
++    return;
++  }
++  drawCentered(ctx,
++               "Des films et des series sur la calculatrice.\n"
++               "Laisse l'appli NumSocial ouverte sur le PC.",
++               52, k_text, k_background);
++  drawCentered(ctx,
++               "Recherche : tape le titre, EXE\n"
++               "Sinon : type, genre, puis le titre\n"
++               "fleches : naviguer   OK : choisir\n"
++               "retour : revenir   maison : quitter",
++               100, k_muted, k_background);
++  drawCentered(ctx, "OK : ouvrir NumStremio", 192, k_accent, k_background);
++}
++
++// --- Controller -------------------------------------------------------------
++
++StremioController::StremioController(Escher::Responder* parentResponder)
++    : Escher::ViewController(parentResponder),
++      m_view(this),
++      m_player(&m_link),
++      m_autoStart(true),
++      m_quit(false),
++      m_lost(false),
++      m_errorSeen(false),
++      m_seen(0),
++      m_lastFrame(0),
++      m_focus(Focus::Search),
++      m_kind(0),
++      m_genre(0),
++      m_page(0),
++      m_more(false),
++      m_loading(false),
++      m_genreCount(0),
++      m_typeCursor(3),
++      m_genreCursor(9),
++      m_titleCursor(4),
++      m_itemCount(0),
++      m_postersValid(0),
++      m_detailKind(0),
++      m_seasonCount(0),
++      m_episodeCount(0),
++      m_providerCount(0),
++      m_streamCount(0),
++      m_subCount(0),
++      m_filteredCount(0),
++      m_subChoice(0),
++      m_speedChoice(0),
++      m_providerCursor(7),
++      m_streamCursor(7),
++      m_optionRow(0),
++      m_sourceColumn(1) {
++  m_message[0] = '\0';
++  m_query[0] = '\0';
++  m_detailTitle[0] = m_detailInfo[0] = '\0';
++}
++
++void StremioController::viewWillAppear() { m_view.redrawAll(); }
++
++void StremioController::showMessage(const char* message) {
++  const size_t length = strlen(message);
++  const size_t count = length < sizeof(m_message) - 1 ? length : sizeof(m_message) - 1;
++  memcpy(m_message, message, count);
++  m_message[count] = '\0';
++  m_view.redrawAll();
++  AppsContainer::sharedAppsContainer()->redrawWindow();
++}
++
++void StremioController::tick() {
++  if (m_autoStart) {
++    m_autoStart = false;
++    runSession();
++  }
++}
++
++bool StremioController::handleEvent(Ion::Events::Event event) {
++  // Plugging the cable would open the DFU screen: we own the USB port instead.
++  if (event == Ion::Events::USBEnumeration) {
++    Ion::USB::clearEnumerationInterrupt();
++    return true;
++  }
++  if (event == Ion::Events::OK || event == Ion::Events::EXE) {
++    runSession();
++    return true;
++  }
++  return false;
++}
++
++void StremioController::drain(uint32_t ms) {
++  const uint64_t end = Ion::Timing::millis() + ms;
++  uint8_t type;
++  const uint8_t* payload;
++  uint16_t length;
++  while (Ion::Timing::millis() < end) {
++    m_link.poll(&type, &payload, &length);
++  }
++}
++
++void StremioController::closeSession() {
++  drain(150);
++  m_link.disconnect();
++  AppsContainer::sharedAppsContainer()->reloadTitleBarView();
++  m_view.redrawAll();
++  AppsContainer::sharedAppsContainer()->redrawWindow();
++}
++
++/* While connected, the calculator never hands control back to Epsilon's event
++ * loop (the USB port would stop answering): the whole session runs here. */
++void StremioController::runSession() {
++  m_message[0] = '\0';
++  m_quit = m_lost = false;
++  if (!m_link.isConnected()) {
++    showMessage("Connexion a l'ordinateur...\nOuvre l'appli NumSocial sur le PC.\n\nRetour : annuler");
++    m_message[0] = '\0';
++    switch (m_link.connect()) {
++      case Numtube::Link::ConnectResult::Connected:
++        break;
++      case Numtube::Link::ConnectResult::Cancelled:
++        m_view.redrawAll();
++        AppsContainer::sharedAppsContainer()->redrawWindow();
++        return;
++      case Numtube::Link::ConnectResult::NoCable:
++        showMessage("Branche la calculatrice a l'ordinateur avec le cable USB.");
++        return;
++    }
++  }
++  m_link.log("numstremio: session");
++  m_genreCount = 0;
++  m_genreCursor.reset(1);
++  m_typeCursor.reset(3);
++  m_kind = m_genre = m_page = 0;
++  m_query[0] = '\0';
++  m_input.clear();
++  m_focus = Focus::Search;
++  clearItems();
++  m_seen = 0;
++  m_link.send(Protocol::Start, nullptr, 0);
++  browse();
++  closeSession();
++  if (m_lost) {
++    showMessage("Le PC ne repond plus.\nL'appli NumSocial est-elle ouverte ?");
++  }
++}
++
++// --- Frames -------------------------------------------------------------------
++
++void StremioController::clearItems() {
++  m_itemCount = 0;
++  m_postersValid = 0;
++  m_more = false;
++  m_titleCursor.reset(0);
++}
++
++bool StremioController::sendBrowse() {
++  clearItems();
++  m_loading = true;
++  uint8_t buffer[4 + k_maxQuery];
++  buffer[0] = static_cast<uint8_t>(m_kind);
++  buffer[1] = static_cast<uint8_t>(m_genre);
++  buffer[2] = static_cast<uint8_t>(m_page & 0xFF);
++  buffer[3] = static_cast<uint8_t>(m_page >> 8);
++  const size_t length = strlen(m_query);
++  memcpy(buffer + 4, m_query, length);
++  return m_link.send(Protocol::Browse, buffer, static_cast<uint16_t>(4 + length));
++}
++
++bool StremioController::pump(int budget) {
++  bool any = false;
++  uint8_t type;
++  const uint8_t* payload;
++  uint16_t length;
++  for (int i = 0; i < budget && m_link.poll(&type, &payload, &length); i++) {
++    any = true;
++    m_lastFrame = Ion::Timing::millis();
++    handleFrame(type, payload, length);
++  }
++  return any;
++}
++
++void StremioController::handleFrame(uint8_t type, const uint8_t* payload, uint16_t length) {
++  Reader r(payload, length);
++  switch (type) {
++    case Protocol::Error: {
++      m_errorSeen = true;
++      m_loading = false;
++      const size_t count = length < sizeof(m_message) - 1 ? length : sizeof(m_message) - 1;
++      memcpy(m_message, payload, count);
++      m_message[count] = '\0';
++      return;
++    }
++    case Protocol::Config: {
++      const int n = r.u8();
++      m_genreCount = 0;
++      for (int i = 0; i < n && i < k_maxGenres; i++) {
++        if (!r.str8(m_genres[i], sizeof(m_genres[i]))) {
++          break;
++        }
++        m_genreCount++;
++      }
++      m_genreCursor.reset(m_genreCount + 1);
++      break;
++    }
++    case Protocol::Item: {
++      const int slot = r.u8();
++      Item item;
++      item.kind = r.u8();
++      r.str8(item.id, sizeof(item.id));
++      r.str8(item.title, sizeof(item.title));
++      r.str8(item.info, sizeof(item.info));
++      if (r.ok() && slot < Protocol::k_pageSize) {
++        m_items[slot] = item;
++        if (slot >= m_itemCount) {
++          m_itemCount = slot + 1;
++        }
++        m_titleCursor.reset(m_itemCount);
++      }
++      break;
++    }
++    case Protocol::ListDone: {
++      const int count = r.u8();
++      m_more = r.u8() != 0;
++      r.u16();
++      if (r.ok()) {
++        m_itemCount = count < Protocol::k_pageSize ? count : Protocol::k_pageSize;
++        m_titleCursor.reset(m_itemCount);
++        m_loading = false;
++      }
++      break;
++    }
++    case Protocol::Poster: {
++      const int slot = r.u8();
++      const int w = r.u8();
++      const int h = r.u8();
++      if (r.ok() && slot < Protocol::k_pageSize && w == Protocol::k_posterWidth &&
++          h == Protocol::k_posterHeight &&
++          r.remaining() >= static_cast<size_t>(w * h * 2)) {
++        const uint8_t* pixels = r.position();
++        for (int i = 0; i < w * h; i++) {
++          m_posters[slot][i] =
++              KDColor::RGB16(static_cast<uint16_t>(pixels[2 * i] | (pixels[2 * i + 1] << 8)));
++        }
++        m_postersValid |= static_cast<uint8_t>(1 << slot);
++      }
++      break;
++    }
++    case Protocol::Detail: {
++      m_detailKind = r.u8();
++      r.str8(m_detailTitle, sizeof(m_detailTitle));
++      r.str8(m_detailInfo, sizeof(m_detailInfo));
++      const int n = r.u8();
++      m_seasonCount = 0;
++      for (int i = 0; i < n && i < k_maxSeasons; i++) {
++        m_seasons[m_seasonCount++] = r.u8();
++      }
++      break;
++    }
++    case Protocol::Episode: {
++      Episode episode;
++      episode.number = r.u16();
++      r.str8(episode.title, sizeof(episode.title));
++      if (r.ok() && m_episodeCount < k_maxEpisodes) {
++        m_episodes[m_episodeCount++] = episode;
++      }
++      break;
++    }
++    case Protocol::Providers: {
++      const int n = r.u8();
++      m_providerCount = 0;
++      for (int i = 0; i < n && i < k_maxProviders; i++) {
++        if (!r.str8(m_providers[i], sizeof(m_providers[i]))) {
++          break;
++        }
++        m_providerCount++;
++      }
++      break;
++    }
++    case Protocol::Stream: {
++      const int index = r.u8();
++      Stream stream;
++      stream.provider = r.u8();
++      r.str8(stream.line1, sizeof(stream.line1));
++      r.str8(stream.line2, sizeof(stream.line2));
++      if (r.ok() && index < k_maxStreams) {
++        m_streams[index] = stream;
++        if (index >= m_streamCount) {
++          m_streamCount = static_cast<uint8_t>(index + 1);
++        }
++      }
++      break;
++    }
++    case Protocol::StreamsDone: {
++      const int count = r.u8();
++      if (r.ok() && count < m_streamCount) {
++        m_streamCount = static_cast<uint8_t>(count);
++      }
++      break;
++    }
++    case Protocol::SubLangs: {
++      const int n = r.u8();
++      m_subCount = 0;
++      for (int i = 0; i < n && i < k_maxSubLangs; i++) {
++        if (!r.str8(m_subLangs[i], sizeof(m_subLangs[i]))) {
++          break;
++        }
++        m_subCount++;
++      }
++      break;
++    }
++    default:
++      return;
++  }
++  if (r.ok()) {
++    m_seen |= bit(type);
++  }
++}
++
++StremioController::Wait StremioController::request(uint8_t type, const uint8_t* payload,
++                                                  uint16_t length, uint8_t doneType,
++                                                  uint32_t timeoutMs, const char* text) {
++  m_seen &= ~bit(doneType);
++  m_errorSeen = false;
++  m_message[0] = '\0';
++  m_link.send(type, payload, length);
++  drawLoading(text);
++  Numtube::KeyWatcher keys;
++  const uint64_t start = Ion::Timing::millis();
++  while (true) {
++    const Key key = keys.next();
++    if (isExitKey(key)) {
++      m_quit = true;
++      return Wait::Quit;
++    }
++    if (key == Key::Back) {
++      return Wait::Back;
++    }
++    if (!Numtube::cablePlugged()) {
++      m_lost = true;
++      return Wait::Lost;
++    }
++    pump(16);
++    if (m_seen & bit(doneType)) {
++      return Wait::Done;
++    }
++    if (m_errorSeen) {
++      return Wait::Error;
++    }
++    if (Ion::Timing::millis() - start > timeoutMs) {
++      return Wait::Timeout;
++    }
++  }
++}
++
++// A message the user acknowledges with any key (or after a few seconds).
++void StremioController::notify(const char* text) {
++  KDContext* ctx = screenContext();
++  ctx->fillRect(KDRect(10, 70, 300, 100), k_panel);
++  ctx->fillRect(KDRect(10, 70, 300, 2), k_warning);
++  drawCentered(ctx, text, 84, k_text, k_panel);
++  drawCentered(ctx, "OK : continuer", 150, k_accent, k_panel);
++  Numtube::KeyWatcher keys;
++  const uint64_t start = Ion::Timing::millis();
++  while (Ion::Timing::millis() - start < 8000) {
++    const Key key = keys.next();
++    if (isExitKey(key)) {
++      m_quit = true;
++      return;
++    }
++    if (key != Key::None) {
++      return;
++    }
++    if (!Numtube::cablePlugged()) {
++      m_lost = true;
++      return;
++    }
++    pump(8);
++  }
++}
++
++// --- Browse -------------------------------------------------------------------
++
++void StremioController::browse() {
++  Numtube::KeyWatcher keys;
++  bool leave = false;
++  bool dirty = true;
++  sendBrowse();
++  while (!leave && keepGoing()) {
++    const Key key = keys.next();
++    if (key != Key::None) {
++      browseKey(key, &leave);
++      keys = Numtube::KeyWatcher();  // nothing typed meanwhile counts twice
++      dirty = true;
++      if (m_errorSeen) {
++        m_errorSeen = false;
++        if (m_message[0] != '\0') {
++          notify(m_message);
++          m_message[0] = '\0';
++        }
++      }
++    }
++    if (pump(32)) {
++      dirty = true;
++      if (m_errorSeen) {
++        m_errorSeen = false;
++        m_loading = false;
++        notify(m_message);
++        m_message[0] = '\0';
++        keys = Numtube::KeyWatcher();
++      }
++    }
++    if (!Numtube::cablePlugged()) {
++      m_lost = true;
++    }
++    if (dirty && keepGoing() && !leave) {
++      drawBrowse();
++      dirty = false;
++    }
++  }
++}
++
++void StremioController::browseKey(Key key, bool* leave) {
++  if (isExitKey(key)) {
++    m_quit = true;
++    *leave = true;
++    return;
++  }
++  if (m_focus == Focus::Search) {
++    if (m_input.handleKey(key) != Numchat::TextInput::Result::Ignored) {
++      return;
++    }
++    switch (key) {
++      case Key::Down:
++        m_focus = m_itemCount > 0 ? Focus::Titles : Focus::Type;
++        break;
++      case Key::OK:
++      case Key::EXE: {
++        const size_t length = m_input.length() < k_maxQuery ? m_input.length() : k_maxQuery;
++        memcpy(m_query, m_input.text(), length);
++        m_query[length] = '\0';
++        m_page = 0;
++        sendBrowse();
++        m_focus = Focus::Titles;
++        break;
++      }
++      case Key::Back:
++        *leave = true;
++        break;
++      default:
++        break;
++    }
++    return;
++  }
++  Cursor& column = m_focus == Focus::Type ? m_typeCursor
++                   : m_focus == Focus::Genre ? m_genreCursor
++                                             : m_titleCursor;
++  switch (key) {
++    case Key::Back:
++      *leave = true;
++      break;
++    case Key::Left:
++      if (m_focus != Focus::Type) {
++        m_focus = m_focus == Focus::Titles ? Focus::Genre : Focus::Type;
++      }
++      break;
++    case Key::Right:
++      if (m_focus == Focus::Titles) {
++        if (m_itemCount > 0) {
++          openItem(m_titleCursor.selection());
++        }
++      } else {
++        m_focus = m_focus == Focus::Type ? Focus::Genre : Focus::Titles;
++      }
++      break;
++    case Key::OK:
++    case Key::EXE:
++      if (m_focus == Focus::Titles) {
++        if (m_itemCount > 0) {
++          openItem(m_titleCursor.selection());
++        }
++      } else {
++        m_focus = m_focus == Focus::Type ? Focus::Genre : Focus::Titles;
++      }
++      break;
++    case Key::Up:
++      if (column.move(-1)) {
++        if (m_focus != Focus::Titles) {
++          m_kind = m_typeCursor.selection();
++          m_genre = m_genreCursor.selection();
++          m_page = 0;
++          sendBrowse();
++        }
++      } else if (m_focus == Focus::Titles && m_page > 0) {
++        m_page--;
++        sendBrowse();
++      } else {
++        m_focus = Focus::Search;
++      }
++      break;
++    case Key::Down:
++      if (column.move(1)) {
++        if (m_focus != Focus::Titles) {
++          m_kind = m_typeCursor.selection();
++          m_genre = m_genreCursor.selection();
++          m_page = 0;
++          sendBrowse();
++        }
++      } else if (m_focus == Focus::Titles && m_more && !m_loading) {
++        m_page++;
++        sendBrowse();
++      }
++      break;
++    default:
++      break;
++  }
++}
++
++// --- Details, episodes, sources ----------------------------------------------
++
++void StremioController::openItem(int slot) {
++  const Item& item = m_items[slot];
++  uint8_t buffer[2 + sizeof(item.id)];
++  const size_t idLength = strlen(item.id);
++  buffer[0] = item.kind;
++  buffer[1] = static_cast<uint8_t>(idLength);
++  memcpy(buffer + 2, item.id, idLength);
++  m_seasonCount = 0;
++  const Wait result = request(Protocol::Open, buffer, static_cast<uint16_t>(2 + idLength),
++                              Protocol::Detail, k_detailTimeoutMs, "Chargement...");
++  if (result == Wait::Error) {
++    notify(m_message);
++    return;
++  }
++  if (result == Wait::Timeout) {
++    notify("Le PC ne repond pas.");
++    return;
++  }
++  if (result != Wait::Done) {
++    return;
++  }
++  if (m_detailKind == 1 || m_seasonCount == 0) {
++    if (m_detailKind == 2) {
++      notify("Aucun episode trouve.");
++      return;
++    }
++    sources(Protocol::k_noSeason, 0);
++  } else {
++    episodes();
++  }
++}
++
++void StremioController::episodes() {
++  Cursor seasons(8);
++  Cursor episodes(8);
++  seasons.reset(m_seasonCount);
++  bool inEpisodes = false;
++  bool loaded = false;
++  Numtube::KeyWatcher keys;
++  bool dirty = true;
++  while (keepGoing()) {
++    if (!loaded) {
++      loaded = true;
++      const uint8_t season = m_seasons[seasons.selection()];
++      m_episodeCount = 0;
++      const Wait result = request(Protocol::Season, &season, 1, Protocol::EpisodesDone,
++                                  k_listTimeoutMs, "Chargement...");
++      if (result == Wait::Error) {
++        notify(m_message);
++      } else if (result != Wait::Done) {
++        if (result == Wait::Timeout) {
++          notify("Le PC ne repond pas.");
++        }
++        return;
++      }
++      episodes.reset(m_episodeCount);
++      keys = Numtube::KeyWatcher();
++      dirty = true;
++    }
++    const Key key = keys.next();
++    if (isExitKey(key)) {
++      m_quit = true;
++      return;
++    }
++    if (key != Key::None) {
++      dirty = true;
++      switch (key) {
++        case Key::Back:
++          if (inEpisodes) {
++            inEpisodes = false;
++          } else {
++            return;
++          }
++          break;
++        case Key::Left:
++          inEpisodes = false;
++          break;
++        case Key::Right:
++          inEpisodes = m_episodeCount > 0;
++          break;
++        case Key::Up:
++        case Key::Down: {
++          const int delta = key == Key::Up ? -1 : 1;
++          if (inEpisodes) {
++            episodes.move(delta);
++          } else if (seasons.move(delta)) {
++            loaded = false;
++          }
++          break;
++        }
++        case Key::OK:
++        case Key::EXE:
++          if (!inEpisodes) {
++            inEpisodes = m_episodeCount > 0;
++          } else {
++            sources(m_seasons[seasons.selection()], m_episodes[episodes.selection()].number);
++            keys = Numtube::KeyWatcher();
++          }
++          break;
++        default:
++          break;
++      }
++    }
++    pump(16);
++    if (!Numtube::cablePlugged()) {
++      m_lost = true;
++    }
++    if (dirty && loaded && keepGoing()) {
++      dirty = false;
++      drawEpisodes(seasons, episodes, inEpisodes);
++    }
++  }
++}
++
++void StremioController::rebuildFilter(int provider) {
++  m_filteredCount = 0;
++  for (int i = 0; i < m_streamCount; i++) {
++    if (provider == 0 || m_streams[i].provider == provider) {
++      m_filtered[m_filteredCount++] = static_cast<uint8_t>(i);
++    }
++  }
++  m_streamCursor.reset(m_filteredCount);
++}
++
++void StremioController::sources(uint8_t season, uint16_t episode) {
++  uint8_t buffer[3] = {season, static_cast<uint8_t>(episode & 0xFF),
++                       static_cast<uint8_t>(episode >> 8)};
++  m_providerCount = m_streamCount = m_subCount = 0;
++  const Wait result = request(Protocol::Streams, buffer, 3, Protocol::SubLangs,
++                              k_streamsTimeoutMs, "Recherche des sources...");
++  if (result == Wait::Error) {
++    notify(m_message);
++    return;
++  }
++  if (result == Wait::Timeout) {
++    notify("Les sources mettent trop de temps.");
++    return;
++  }
++  if (result != Wait::Done) {
++    return;
++  }
++  if (m_streamCount == 0) {
++    notify("Aucune source trouvee.\nAjoute un addon de sources\ndans l'appli NumSocial.");
++    return;
++  }
++  m_providerCursor.reset(m_providerCount + 1);
++  rebuildFilter(0);
++  m_sourceColumn = 1;
++  m_optionRow = 0;
++  if (m_subChoice > m_subCount) {
++    m_subChoice = 0;
++  }
++  Numtube::KeyWatcher keys;
++  bool dirty = true;
++  while (keepGoing()) {
++    const Key key = keys.next();
++    if (isExitKey(key)) {
++      m_quit = true;
++      return;
++    }
++    if (key != Key::None) {
++      dirty = true;
++      switch (key) {
++        case Key::Back:
++          return;
++        case Key::Left:
++          if (m_sourceColumn == 2) {
++            if (m_optionRow == 0) {
++              m_subChoice = cycle(m_subChoice, -1, m_subCount + 1);
++            } else {
++              m_speedChoice = cycle(m_speedChoice, -1, 4);
++            }
++          } else if (m_sourceColumn == 1) {
++            m_sourceColumn = 0;
++          }
++          break;
++        case Key::Right:
++          if (m_sourceColumn == 2) {
++            if (m_optionRow == 0) {
++              m_subChoice = cycle(m_subChoice, 1, m_subCount + 1);
++            } else {
++              m_speedChoice = cycle(m_speedChoice, 1, 4);
++            }
++          } else if (m_sourceColumn == 0) {
++            m_sourceColumn = 1;
++          }
++          break;
++        case Key::Up:
++          if (m_sourceColumn == 2) {
++            if (m_optionRow == 0) {
++              m_sourceColumn = 1;
++            } else {
++              m_optionRow = 0;
++            }
++          } else if (m_sourceColumn == 0) {
++            if (m_providerCursor.move(-1)) {
++              rebuildFilter(m_providerCursor.selection());
++            }
++          } else {
++            m_streamCursor.move(-1);
++          }
++          break;
++        case Key::Down:
++          if (m_sourceColumn == 2) {
++            m_optionRow = 1;
++          } else if (m_sourceColumn == 0) {
++            if (m_providerCursor.move(1)) {
++              rebuildFilter(m_providerCursor.selection());
++            } else {
++              m_sourceColumn = 2;
++            }
++          } else if (!m_streamCursor.move(1)) {
++            m_sourceColumn = 2;
++          }
++          break;
++        case Key::OK:
++        case Key::EXE:
++          if (m_sourceColumn == 0) {
++            m_sourceColumn = 1;
++          } else if (m_sourceColumn == 2) {
++            if (m_optionRow == 0) {
++              m_subChoice = cycle(m_subChoice, 1, m_subCount + 1);
++            } else {
++              m_speedChoice = cycle(m_speedChoice, 1, 4);
++            }
++          } else if (m_filteredCount > 0) {
++            play(m_filtered[m_streamCursor.selection()]);
++            keys = Numtube::KeyWatcher();
++          }
++          break;
++        default:
++          break;
++      }
++    }
++    pump(16);
++    if (!Numtube::cablePlugged()) {
++      m_lost = true;
++    }
++    if (dirty && keepGoing()) {
++      dirty = false;
++      drawSources();
++    }
++  }
++}
++
++void StremioController::play(int streamIndex) {
++  char id[24];
++  char* out = id;
++  *out++ = '@';
++  number(out, streamIndex);
++  out += strlen(out);
++  *out++ = '.';
++  number(out, m_subChoice);
++  out += strlen(out);
++  *out++ = '.';
++  number(out, m_speedChoice);
++  const Numtube::Player::Exit exit = m_player.play(id);
++  drain(300);  // late video frames
++  AppsContainer::sharedAppsContainer()->reloadTitleBarView();
++  switch (exit) {
++    case Numtube::Player::Exit::Error:
++      notify(m_player.errorMessage()[0] != '\0' ? m_player.errorMessage() : "Lecture impossible.");
++      break;
++    case Numtube::Player::Exit::Disconnected:
++      m_lost = true;
++      break;
++    default:
++      break;
++  }
++}
++
++// --- Drawing ---------------------------------------------------------------------
++
++void StremioController::drawLoading(const char* text) {
++  KDContext* ctx = screenContext();
++  ctx->fillRect(KDRect(0, 0, k_width, k_height), k_background);
++  drawCentered(ctx, "NumStremio", 18, k_accent, k_background, KDFont::Size::Large);
++  drawCentered(ctx, text, 100, k_text, k_background);
++  drawCentered(ctx, "Retour : annuler", 200, k_muted, k_background);
++}
++
++void StremioController::drawHeader(const char* title, const char* info) {
++  KDContext* ctx = screenContext();
++  ctx->fillRect(KDRect(0, 0, k_width, k_height), k_background);
++  ctx->fillRect(KDRect(0, 0, k_width, 24), k_panel);
++  drawText(ctx, 6, 5, title, k_text, k_panel, k_width - 12);
++  drawText(ctx, 6, 30, info, k_muted, k_background, k_width - 12);
++}
++
++void StremioController::drawBrowse() {
++  KDContext* ctx = screenContext();
++  const int gw = glyphWidth();
++  const int gh = glyphHeight();
++  ctx->fillRect(KDRect(0, 0, k_width, k_height), k_background);
++
++  // Search bar.
++  const bool searchFocus = m_focus == Focus::Search;
++  ctx->fillRect(KDRect(4, 3, k_width - 8, 22), searchFocus ? k_accent : k_panel);
++  ctx->fillRect(KDRect(6, 5, k_width - 12, 18), k_panel);
++  const Ion::Events::ShiftAlphaStatus mods = m_input.modifiers();
++  const char* mode = "123";
++  if (mods.alphaIsActive()) {
++    const bool upper = mods.shiftIsActive();
++    mode = mods.alphaIsLocked() ? (upper ? "ABC" : "abc") : (upper ? "A" : "a");
++  } else if (mods.shiftIsActive()) {
++    mode = "shift";
++  }
++  const int modeWidth = static_cast<int>(strlen(mode)) * gw;
++  const int fieldWidth = k_width - 12 - modeWidth - 16;
++  if (m_input.isEmpty()) {
++    drawText(ctx, 10, 8, "Rechercher un film, une serie...", k_muted, k_panel, fieldWidth);
++  } else {
++    const char* shown = tail(m_input.text(), fieldWidth / gw - 1);
++    ctx->drawString(shown, KDPoint(10, 8), KDGlyph::Style{k_text, k_panel, k_font});
++  }
++  if (searchFocus) {
++    ctx->drawString(mode, KDPoint(k_width - 10 - modeWidth, 8), KDGlyph::Style{k_accent, k_panel, k_font});
++  }
++
++  // Type column.
++  static const char* const k_types[3] = {"Tous", "Films", "Series"};
++  for (int i = 0; i < 3; i++) {
++    const bool selected = i == m_typeCursor.selection();
++    const KDColor bg = selected ? (m_focus == Focus::Type ? k_accent : k_selected) : k_panel;
++    ctx->fillRect(KDRect(4, k_listTop + i * k_rowHeight, 62, k_rowHeight - 2), bg);
++    drawText(ctx, 8, k_listTop + 3 + i * k_rowHeight, k_types[i], k_text, bg, 56);
++  }
++  drawText(ctx, 4, k_listTop + 3 * k_rowHeight + 4, "Type", k_muted, k_background, 62);
++
++  // Genre column.
++  for (int row = 0; row < m_genreCursor.visible(); row++) {
++    const int index = m_genreCursor.first() + row;
++    if (index >= m_genreCursor.count()) {
++      break;
++    }
++    const bool selected = index == m_genreCursor.selection();
++    const KDColor bg = selected ? (m_focus == Focus::Genre ? k_accent : k_selected) : k_panel;
++    ctx->fillRect(KDRect(70, k_listTop + row * k_rowHeight, 84, k_rowHeight - 2), bg);
++    drawText(ctx, 74, k_listTop + 3 + row * k_rowHeight, index == 0 ? "Tous genres" : m_genres[index - 1],
++             k_text, bg, 78);
++  }
++
++  // Titles column, with posters.
++  for (int row = 0; row < m_titleCursor.visible(); row++) {
++    const int index = m_titleCursor.first() + row;
++    const int y = k_listTop + row * k_titleRowHeight;
++    ctx->fillRect(KDRect(158, y, 158, k_titleRowHeight - 2), k_panel);
++    if (index >= m_itemCount) {
++      continue;
++    }
++    const bool selected = index == m_titleCursor.selection();
++    const KDColor bg = selected ? (m_focus == Focus::Titles ? k_accent : k_selected) : k_panel;
++    ctx->fillRect(KDRect(158, y, 158, k_titleRowHeight - 2), bg);
++    if (m_postersValid >> index & 1) {
++      Ion::Display::pushRect(KDRect(162, y + 2, Protocol::k_posterWidth, Protocol::k_posterHeight),
++                             m_posters[index]);
++    } else {
++      ctx->fillRect(KDRect(162, y + 2, Protocol::k_posterWidth, Protocol::k_posterHeight), k_background);
++    }
++    const Item& item = m_items[index];
++    const int textX = 162 + Protocol::k_posterWidth + 4;
++    const int textWidth = 316 - textX - 2;
++    drawText(ctx, textX, y + 4, item.title, k_text, bg, textWidth);
++    drawText(ctx, textX, y + 4 + gh + 2, item.info, k_muted, bg, textWidth);
++    drawText(ctx, textX, y + 4 + 2 * (gh + 2), item.kind == 2 ? "Serie" : "Film", k_warning, bg, textWidth);
++  }
++
++  // Footer.
++  const int footerY = k_height - gh - 3;
++  if (m_loading) {
++    drawText(ctx, 4, footerY, "Chargement...", k_warning, k_background, 150);
++  } else if (m_itemCount == 0) {
++    drawText(ctx, 4, footerY, "Aucun resultat", k_muted, k_background, 150);
++  } else {
++    char page[24] = "Page ";
++    number(page + 5, m_page + 1);
++    drawText(ctx, 4, footerY, page, k_muted, k_background, 80);
++  }
++  drawText(ctx, 100, footerY, "OK : ouvrir   retour : quitter", k_muted, k_background, 216);
++}
++
++void StremioController::drawEpisodes(const Cursor& seasons, const Cursor& episodes, bool inEpisodes) {
++  drawHeader(m_detailTitle, m_detailInfo);
++  KDContext* ctx = screenContext();
++  drawText(ctx, 4, 44, "Saisons", k_muted, k_background, 96);
++  drawText(ctx, 104, 44, "Episodes", k_muted, k_background, 100);
++  for (int row = 0; row < seasons.visible(); row++) {
++    const int index = seasons.first() + row;
++    if (index >= seasons.count()) break;
++    char label[16] = "Saison ";
++    number(label + 7, m_seasons[index]);
++    const bool selected = index == seasons.selection();
++    const KDColor bg = selected ? (inEpisodes ? k_selected : k_accent) : k_panel;
++    ctx->fillRect(KDRect(4, 50 + row * k_rowHeight, 96, k_rowHeight - 2), bg);
++    drawText(ctx, 8, 53 + row * k_rowHeight, m_seasons[index] == 0 ? "Hors saison" : label, k_text, bg, 90);
++  }
++  for (int row = 0; row < episodes.visible(); row++) {
++    const int index = episodes.first() + row;
++    if (index >= episodes.count()) break;
++    char label[48];
++    number(label, m_episodes[index].number);
++    size_t used = strlen(label);
++    label[used++] = '.';
++    label[used++] = ' ';
++    label[used] = '\0';
++    append(label, sizeof(label), m_episodes[index].title);
++    const bool selected = inEpisodes && index == episodes.selection();
++    const KDColor bg = selected ? k_accent : k_panel;
++    ctx->fillRect(KDRect(104, 50 + row * k_rowHeight, 212, k_rowHeight - 2), bg);
++    drawText(ctx, 108, 53 + row * k_rowHeight, label, k_text, bg, 204);
++  }
++  const int footerY = k_height - glyphHeight() - 3;
++  drawText(ctx, 4, footerY, "OK : choisir   retour : revenir", k_muted, k_background, 312);
++}
++
++void StremioController::drawSources() {
++  KDContext* ctx = screenContext();
++  const int gh = glyphHeight();
++  drawHeader(m_detailTitle, "Choisis une source");
++  drawText(ctx, 4, 44, "Fournisseur", k_muted, k_background, 80);
++  drawText(ctx, 100, 44, "Sources", k_muted, k_background, 100);
++
++  for (int row = 0; row < m_providerCursor.visible(); row++) {
++    const int index = m_providerCursor.first() + row;
++    if (index >= m_providerCursor.count()) {
++      break;
++    }
++    const bool selected = index == m_providerCursor.selection();
++    const KDColor bg = selected ? (m_sourceColumn == 0 ? k_accent : k_selected) : k_panel;
++    ctx->fillRect(KDRect(4, 58 + row * 22, 92, 20), bg);
++    drawText(ctx, 8, 62 + row * 22, index == 0 ? "Tous" : m_providers[index - 1], k_text, bg, 84);
++  }
++  for (int row = 0; row < m_streamCursor.visible(); row++) {
++    const int index = m_streamCursor.first() + row;
++    if (index >= m_filteredCount) {
++      break;
++    }
++    const bool selected = index == m_streamCursor.selection();
++    const KDColor bg = selected ? (m_sourceColumn == 1 ? k_accent : k_selected) : k_panel;
++    const Stream& stream = m_streams[m_filtered[index]];
++    ctx->fillRect(KDRect(100, 58 + row * 22, 216, 20), bg);
++    drawText(ctx, 104, 59 + row * 22, stream.line1, k_text, bg, 208);
++    drawText(ctx, 104, 59 + row * 22 + gh - 1, stream.line2, k_muted, bg, 208);
++  }
++
++  // Options: subtitles and connection speed, for the video that will play.
++  static const char* const k_speeds[4] = {"Auto", "Lente", "Moyenne", "Rapide"};
++  const int optionsY = 58 + 7 * 22 + 2;
++  for (int row = 0; row < 2; row++) {
++    const bool focus = m_sourceColumn == 2 && m_optionRow == row;
++    const KDColor bg = focus ? k_accent : k_panel;
++    ctx->fillRect(KDRect(4, optionsY + row * 11, 312, 11), bg);
++    char line[64];
++    line[0] = '\0';
++    if (row == 0) {
++      append(line, sizeof(line), "Sous-titres : ");
++      append(line, sizeof(line), m_subChoice == 0 ? "Aucun" : m_subLangs[m_subChoice - 1]);
++    } else {
++      append(line, sizeof(line), "Connexion : ");
++      append(line, sizeof(line), k_speeds[m_speedChoice]);
++    }
++    drawText(ctx, 8, optionsY + row * 11 - 1, line, k_text, bg, 304);
++  }
++}
++
++}  // namespace Numstremio
+diff --git a/epsilon/apps/numstremio/stremio_controller.h b/epsilon/apps/numstremio/stremio_controller.h
+new file mode 100644
+index 0000000000..766a94f6f2
+--- /dev/null
++++ b/epsilon/apps/numstremio/stremio_controller.h
+@@ -0,0 +1,157 @@
++#pragma once
++
++#include <apps/numchat/text_input.h>
++#include <apps/numtube/link.h>
++#include <apps/numtube/player.h>
++#include <escher/view.h>
++#include <escher/view_controller.h>
++#include <kandinsky/color.h>
++
++#include "model.h"
++#include "protocol.h"
++
++namespace Numstremio {
++
++class StremioController;
++
++// Start and error screen. Everything else is drawn straight to the display by
++// the session loop (the calculator never returns to Escher while connected).
++class StartView : public Escher::View {
++ public:
++  explicit StartView(const StremioController* controller) : m_controller(controller) {}
++  void drawRect(KDContext* ctx, KDRect rect) const override;
++  void redrawAll() { markRectAsDirty(bounds()); }
++
++ private:
++  const StremioController* m_controller;
++};
++
++class StremioController : public Escher::ViewController {
++ public:
++  explicit StremioController(Escher::Responder* parentResponder);
++
++  Escher::View* view() override { return &m_view; }
++  bool handleEvent(Ion::Events::Event event) override;
++  void viewWillAppear() override;
++  void disconnect() { m_link.disconnect(); }
++  // Called by the app's timer while Escher runs: opens the session once.
++  void tick();
++  const char* message() const { return m_message; }
++
++  static constexpr int k_maxGenres = 24;
++  static constexpr int k_maxSeasons = 40;
++  static constexpr int k_maxEpisodes = 60;
++  static constexpr int k_maxProviders = 12;
++  static constexpr int k_maxStreams = 30;
++  static constexpr int k_maxSubLangs = 12;
++  static constexpr int k_maxQuery = 60;
++
++ private:
++  enum class Wait { Done, Back, Quit, Lost, Error, Timeout };
++  enum class Focus { Search, Type, Genre, Titles };
++
++  struct Item {
++    uint8_t kind;
++    char id[40];
++    char title[44];
++    char info[28];
++  };
++  struct Episode {
++    uint16_t number;
++    char title[32];
++  };
++  struct Stream {
++    uint8_t provider;
++    char line1[48];
++    char line2[48];
++  };
++
++  // Session
++  void showMessage(const char* message);
++  void runSession();
++  void closeSession();
++  bool keepGoing() const { return !m_quit && !m_lost; }
++
++  // Frames
++  bool pump(int budget);
++  void handleFrame(uint8_t type, const uint8_t* payload, uint16_t length);
++  Wait request(uint8_t type, const uint8_t* payload, uint16_t length, uint8_t doneType,
++               uint32_t timeoutMs, const char* text);
++  void notify(const char* text);
++  void drain(uint32_t ms);
++  bool sendBrowse();
++  void clearItems();
++
++  // Screens
++  void browse();
++  void browseKey(Ion::Keyboard::Key key, bool* leave);
++  void openItem(int slot);
++  void episodes();
++  void sources(uint8_t season, uint16_t episode);
++  void play(int streamIndex);
++  void rebuildFilter(int provider);
++
++  // Drawing
++  void drawBrowse();
++  void drawEpisodes(const Cursor& seasons, const Cursor& episodes, bool inEpisodes);
++  void drawSources();
++  void drawLoading(const char* text);
++  void drawHeader(const char* title, const char* info);
++
++  StartView m_view;
++  Numtube::Link m_link;
++  Numtube::Player m_player;
++  Numchat::TextInput m_input;
++  bool m_autoStart;
++  bool m_quit;
++  bool m_lost;
++  bool m_errorSeen;
++  uint32_t m_seen;  // bit (type - 0xB0): frame received since the request
++  uint64_t m_lastFrame;
++  char m_message[120];
++
++  // Browse state
++  Focus m_focus;
++  int m_kind;   // 0 all, 1 movies, 2 series
++  int m_genre;  // 0 all, else 1-based
++  int m_page;
++  bool m_more;
++  bool m_loading;
++  char m_query[k_maxQuery + 1];
++  uint8_t m_genreCount;
++  char m_genres[k_maxGenres][16];
++  Cursor m_typeCursor;
++  Cursor m_genreCursor;
++  Cursor m_titleCursor;
++  Item m_items[Protocol::k_pageSize];
++  int m_itemCount;
++  uint8_t m_postersValid;
++  KDColor m_posters[Protocol::k_pageSize][Protocol::k_posterWidth * Protocol::k_posterHeight];
++
++  // Detail
++  uint8_t m_detailKind;
++  char m_detailTitle[64];
++  char m_detailInfo[44];
++  uint8_t m_seasonCount;
++  uint8_t m_seasons[k_maxSeasons];
++  Episode m_episodes[k_maxEpisodes];
++  int m_episodeCount;
++
++  // Sources
++  uint8_t m_providerCount;
++  char m_providers[k_maxProviders][16];
++  uint8_t m_streamCount;
++  Stream m_streams[k_maxStreams];
++  uint8_t m_subCount;
++  char m_subLangs[k_maxSubLangs][16];
++  uint8_t m_filtered[k_maxStreams];
++  int m_filteredCount;
++  int m_subChoice;    // 0 none, else 1-based
++  int m_speedChoice;  // 0 auto, 1 low, 2 medium, 3 high
++  Cursor m_providerCursor;
++  Cursor m_streamCursor;
++  int m_optionRow;
++  int m_sourceColumn;  // 0 providers, 1 streams, 2 options
++};
++
++}  // namespace Numstremio

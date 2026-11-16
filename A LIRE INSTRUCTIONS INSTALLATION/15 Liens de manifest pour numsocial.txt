@@ -1,0 +1,5 @@
+https://torrentio.strem.fun/lite/manifest.json
+
+https://scplus.duckdns.org/manifest.json
+
+https://catalogo.noe359866.workers.dev/manifest.json

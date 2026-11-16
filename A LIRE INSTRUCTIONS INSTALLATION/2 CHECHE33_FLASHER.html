@@ -1,0 +1,439 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>CHED OS Installateur</title>
+<style>
+:root{
+  --bg1:#9a9ea6;--bg2:#5d616a;--bg3:#25282d;
+  --glass:rgba(255,255,255,.16);--glass2:rgba(255,255,255,.08);--rim:rgba(255,255,255,.35);
+  --txt:#f4f5f7;--dim:#c9ccd3;--acc:#6ec8ff;--ok:#88e8a8;--bad:#ff6c62;--warn:#ffc85a;
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%}
+body{font:15px/1.5 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;color:var(--txt);
+  background:linear-gradient(135deg,var(--bg1) 0%,var(--bg2) 45%,var(--bg3) 100%) fixed;padding:24px 16px 48px}
+body::before{content:"";position:fixed;inset:0;pointer-events:none;
+  background:radial-gradient(600px 400px at 20% 10%,rgba(255,255,255,.22),transparent 60%),radial-gradient(500px 380px at 85% 80%,rgba(110,200,255,.14),transparent 60%)}
+main{position:relative;max-width:780px;margin:0 auto}
+h1{margin:0 0 2px;font-size:26px;letter-spacing:.5px}
+h1 small{font-weight:500;color:var(--acc);font-size:14px;margin-left:8px}
+.sub{color:var(--dim);margin:0 0 18px}
+.card{background:linear-gradient(180deg,var(--glass),var(--glass2));border:1px solid var(--rim);border-radius:20px;
+  padding:16px 18px;margin:14px 0;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  box-shadow:0 10px 30px rgba(0,0,0,.28),inset 0 1px 0 rgba(255,255,255,.35);transition:opacity .3s,transform .3s}
+.card.off{opacity:.45;pointer-events:none}
+.card h2{margin:0 0 10px;font-size:16px;display:flex;align-items:center;gap:10px}
+.num{display:inline-grid;place-items:center;width:26px;height:26px;border-radius:50%;background:linear-gradient(180deg,#8fd6ff,#2f86d6);font-size:13px;font-weight:700}
+.done .num{background:linear-gradient(180deg,#a6f0c0,#2fa862)}
+button,.btn{font:inherit;color:var(--txt);cursor:pointer;border:1px solid var(--rim);border-radius:12px;padding:9px 16px;
+  background:linear-gradient(180deg,rgba(255,255,255,.28),rgba(255,255,255,.08));transition:transform .15s,box-shadow .15s,background .2s}
+button:hover,.btn:hover{transform:translateY(-1px);box-shadow:0 6px 16px rgba(0,0,0,.3)}
+button:active{transform:scale(.97)}
+button.primary{background:linear-gradient(180deg,#7fd0ff,#2d83d4);border-color:rgba(255,255,255,.55);font-weight:600}
+button.danger{background:linear-gradient(180deg,#ff8f86,#c9362b);border-color:rgba(255,255,255,.5);font-weight:600}
+button:disabled{opacity:.45;cursor:not-allowed;transform:none;box-shadow:none}
+.row{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.dim{color:var(--dim)}.mono{font-family:ui-monospace,Consolas,monospace;font-size:13px}
+.kv{display:grid;grid-template-columns:130px 1fr;gap:4px 12px;margin-top:10px;font-size:14px}
+.kv b{color:var(--dim);font-weight:500}
+.drop{border:2px dashed var(--rim);border-radius:16px;padding:22px;text-align:center;color:var(--dim);transition:all .2s}
+.drop.over{border-color:var(--acc);background:rgba(110,200,255,.12);color:var(--txt);transform:scale(1.01)}
+.files{margin-top:10px;display:grid;gap:6px}
+.file{display:flex;gap:10px;align-items:center;padding:8px 12px;border-radius:12px;border:1px solid transparent;background:rgba(0,0,0,.14);cursor:pointer}
+.file.sel{border-color:var(--acc);background:rgba(110,200,255,.16)}
+.file .sz{margin-left:auto;color:var(--dim);font-size:13px}
+.tag{font-size:11px;padding:2px 8px;border-radius:99px;background:rgba(255,255,255,.2)}
+.tag.rec{background:rgba(136,232,168,.35)}
+select,input[type=text]{font:inherit;color:var(--txt);background:rgba(0,0,0,.25);border:1px solid var(--rim);border-radius:10px;padding:8px 10px}
+select option{color:#111}
+.bar{height:14px;border-radius:99px;background:rgba(0,0,0,.3);overflow:hidden;border:1px solid var(--rim);margin:12px 0 6px}
+.bar>i{display:block;height:100%;width:0;background:linear-gradient(90deg,#6ec8ff,#a9e6ff,#6ec8ff);background-size:200% 100%;animation:sh 1.4s linear infinite;transition:width .2s}
+@keyframes sh{to{background-position:-200% 0}}
+#log{height:190px;overflow:auto;background:rgba(0,0,0,.35);border-radius:12px;padding:10px 12px;margin-top:10px;white-space:pre-wrap}
+.l-ok{color:var(--ok)}.l-bad{color:var(--bad)}.l-warn{color:var(--warn)}
+.note{font-size:13px;color:var(--dim);margin-top:8px}
+.warn{border-left:4px solid var(--warn);padding:8px 12px;background:rgba(255,200,90,.12);border-radius:8px;margin-top:10px;font-size:14px}
+.bad{border-left-color:var(--bad);background:rgba(255,108,98,.14)}
+details summary{cursor:pointer;color:var(--dim)}
+label.chk{display:flex;gap:8px;align-items:flex-start;margin-top:10px}
+</style>
+</head>
+<body>
+<main>
+  <h1>CHED OS <small>Installateur NumWorks · WebUSB</small></h1>
+  <p class="sub">Installe sur ta NumWorks un firmware <b>.dfu</b> / <b>.bin</b> (seul ou dans un <b>.zip</b>) directement depuis le navigateur. Rien n'est envoyé sur Internet.</p>
+
+  <div id="unsupported" class="warn bad" hidden>
+    WebUSB n'est pas disponible. Ouvre cette page avec <b>Google Chrome</b>, <b>Edge</b> ou <b>Opera</b> (pas Firefox / Safari), depuis un fichier local ou en https.
+  </div>
+
+  <section class="card" id="c1">
+    <h2><span class="num">1</span> Choisir la calculatrice</h2>
+    <div class="row">
+      <button class="primary" id="btnConnect">Choisir la calculatrice…</button>
+      <button id="btnForget" hidden>Déconnecter</button>
+    </div>
+    <p class="note">Mets la calculatrice en <b>mode DFU</b> : éteinte, maintiens la touche <b>6</b> et branche l'USB (ou appuie sur le bouton reset au dos). Sous Windows, il faut le pilote <b>WinUSB</b> pour « 0483:DF11 » (outil <i>Zadig</i>), comme pour le site officiel NumWorks.</p>
+    <div id="devinfo" hidden>
+      <div class="kv" id="devkv"></div>
+    </div>
+  </section>
+
+  <section class="card off" id="c2">
+    <h2><span class="num">2</span> Choisir le fichier ou le zip</h2>
+    <label class="drop" id="drop">
+      Glisse ton <b>.zip</b> / <b>.dfu</b> / <b>.bin</b> ici ou <u>clique pour parcourir</u>
+      <input type="file" id="file" accept=".zip,.dfu,.bin" hidden>
+    </label>
+    <div id="files" class="files"></div>
+    <div id="fileinfo" class="note"></div>
+  </section>
+
+  <section class="card off" id="c3">
+    <h2><span class="num">3</span> Destination</h2>
+    <div id="dfuseInfo" hidden></div>
+    <div id="binTarget" hidden>
+      <div class="row">
+        <span class="dim">Adresse de départ :</span>
+        <select id="preset">
+          <option value="0x90010000">Slot A — 0x90010000</option>
+          <option value="0x90410000">Slot B — 0x90410000</option>
+          <option value="custom">Personnalisée…</option>
+        </select>
+        <input type="text" id="addr" class="mono" value="0x90010000" size="12">
+      </div>
+      <p class="note">Valeurs de la documentation officielle (userland A / B). Le slot suggéré est détecté d'après les zones que la calculatrice annonce.</p>
+    </div>
+    <label class="chk"><input type="checkbox" id="leave" checked> <span>Redémarrer la calculatrice sur le nouveau firmware à la fin</span></label>
+  </section>
+
+  <section class="card off" id="c4">
+    <h2><span class="num">4</span> Flasher</h2>
+    <div id="risk"></div>
+    <label class="chk"><input type="checkbox" id="ack"> <span>Je comprends que ça remplace le logiciel tiers installé. Un reset de la calculatrice remet le firmware officiel.</span></label>
+    <div class="row" style="margin-top:12px">
+      <button class="danger" id="btnFlash" disabled>Flasher</button>
+      <button id="btnLog">Enregistrer le journal</button>
+    </div>
+    <div class="bar"><i id="pb"></i></div>
+    <div class="note" id="pt">En attente.</div>
+    <div id="log" class="mono"></div>
+  </section>
+</main>
+
+<script>
+"use strict";
+/* Rempli par make_installer.py : {A:"base64 gzip",B:"base64 gzip"} */
+const EMBEDDED=null;/*EMBED*/
+/*PURE_START*/
+// ---------- layout DfuSe : "@Nom /0x90000000/512*004Kg,01*064Kg" ----------
+function parseLayout(name){
+  const m = /^@([^/]*)\/0x([0-9a-fA-F]+)\/(.*)$/.exec((name||"").trim());
+  if(!m) return null;
+  let addr = parseInt(m[2],16) >>> 0; const sectors=[];
+  for(const seg of m[3].split(",")){
+    const s = /^\s*(\d+)\*\s*(\d+)\s*([BKM ])\s*([a-g])\s*$/i.exec(seg);
+    if(!s) continue;
+    const mul = {B:1,K:1024,M:1048576," ":1}[s[3].toUpperCase()];
+    const size = parseInt(s[2],10)*mul, flag = s[4].toLowerCase().charCodeAt(0)-96; // a=1..g=7
+    for(let i=0;i<parseInt(s[1],10);i++){
+      sectors.push({start:addr,size,erase:(flag&2)!==0,write:(flag&4)!==0});
+      addr = (addr+size)>>>0;
+    }
+  }
+  if(!sectors.length) return null;
+  return {name:m[1].trim(), start:sectors[0].start, end:sectors[sectors.length-1].start+sectors[sectors.length-1].size, sectors};
+}
+// ---------- fichier DfuSe (.dfu) ----------
+function parseDfuse(buf){
+  const u=new Uint8Array(buf), dv=new DataView(buf);
+  if(u.length<11 || String.fromCharCode(...u.slice(0,5))!=="DfuSe") return null;
+  const nt=u[10]; let p=11; const elements=[];
+  for(let t=0;t<nt;t++){
+    if(String.fromCharCode(...u.slice(p,p+6))!=="Target") throw new Error("Fichier DfuSe invalide (Target)");
+    const alt=u[p+6]; const ne=dv.getUint32(p+270,true); p+=274;
+    for(let e=0;e<ne;e++){
+      const addr=dv.getUint32(p,true), size=dv.getUint32(p+4,true); p+=8;
+      if(p+size>u.length) throw new Error("Fichier DfuSe tronqué");
+      elements.push({alt,addr,data:u.slice(p,p+size)}); p+=size;
+    }
+  }
+  return elements;
+}
+// ---------- lecture ZIP (sans bibliothèque) ----------
+async function inflateRaw(bytes){
+  const ds=new DecompressionStream("deflate-raw");
+  const stream=new Blob([bytes]).stream().pipeThrough(ds);
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+function listZip(buf){
+  const dv=new DataView(buf), u=new Uint8Array(buf); let e=-1;
+  for(let i=u.length-22;i>=Math.max(0,u.length-65557);i--) if(dv.getUint32(i,true)===0x06054b50){e=i;break;}
+  if(e<0) throw new Error("Ce n'est pas un zip valide");
+  const n=dv.getUint16(e+10,true); let p=dv.getUint32(e+16,true); const out=[];
+  for(let i=0;i<n;i++){
+    if(dv.getUint32(p,true)!==0x02014b50) throw new Error("Zip corrompu (répertoire central)");
+    const method=dv.getUint16(p+10,true), csize=dv.getUint32(p+20,true), usize=dv.getUint32(p+24,true);
+    const nl=dv.getUint16(p+28,true), el=dv.getUint16(p+30,true), cl=dv.getUint16(p+32,true), off=dv.getUint32(p+42,true);
+    const name=new TextDecoder().decode(u.slice(p+46,p+46+nl));
+    if(csize===0xFFFFFFFF||usize===0xFFFFFFFF||off===0xFFFFFFFF) throw new Error("Zip64 non pris en charge");
+    if(!name.endsWith("/")) out.push({name,method,csize,usize,off});
+    p+=46+nl+el+cl;
+  }
+  return out;
+}
+async function readZipEntry(buf,ent){
+  const dv=new DataView(buf), u=new Uint8Array(buf);
+  if(dv.getUint32(ent.off,true)!==0x04034b50) throw new Error("En-tête local invalide");
+  const start=ent.off+30+dv.getUint16(ent.off+26,true)+dv.getUint16(ent.off+28,true);
+  const raw=u.slice(start,start+ent.csize);
+  if(ent.method===0) return raw;
+  if(ent.method===8) return inflateRaw(raw);
+  throw new Error("Méthode de compression zip non prise en charge ("+ent.method+")");
+}
+/*PURE_END*/
+
+// ================= DFU (STM32 DfuSe) via WebUSB =================
+const $=id=>document.getElementById(id);
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+const hex=n=>"0x"+(n>>>0).toString(16).toUpperCase().padStart(8,"0");
+const logEl=$("log"); let logText="";
+function log(msg,cls){
+  const t=new Date().toLocaleTimeString(); const line=`[${t}] ${msg}`; logText+=line+"\n";
+  const d=document.createElement("div"); if(cls)d.className=cls; d.textContent=line; logEl.appendChild(d); logEl.scrollTop=logEl.scrollHeight;
+}
+const DFU={DNLOAD:1,GETSTATUS:3,CLRSTATUS:4,ABORT:6};
+const ST={IDLE:2,DNBUSY:4,DNIDLE:5,MANIFESTSYNC:6,MANIFEST:7,ERROR:10};
+
+let dev=null, ifaceNum=0, transferSize=2048, alts=[];   // alts: {alt,name,layout}
+let image=null;      // {kind:"dfuse"|"bin", elements?:[{addr,data}], data?}
+let zipBuf=null, zipEntries=[], selName=null, busy=false;
+
+async function ctlOut(req,value,data){
+  const r=await dev.controlTransferOut({requestType:"class",recipient:"interface",request:req,value,index:ifaceNum},data);
+  if(r.status!=="ok") throw new Error("Transfert USB refusé ("+r.status+")");
+}
+async function getStatus(){
+  const r=await dev.controlTransferIn({requestType:"class",recipient:"interface",request:DFU.GETSTATUS,value:0,index:ifaceNum},6);
+  if(r.status!=="ok"||r.data.byteLength<6) throw new Error("GETSTATUS a échoué");
+  const d=r.data; return {status:d.getUint8(0),poll:d.getUint8(1)|(d.getUint8(2)<<8)|(d.getUint8(3)<<16),state:d.getUint8(4)};
+}
+async function toIdle(){
+  let s=await getStatus();
+  if(s.state===ST.ERROR){ await ctlOut(DFU.CLRSTATUS,0); s=await getStatus(); }
+  if(s.state!==ST.IDLE){ await ctlOut(DFU.ABORT,0); s=await getStatus(); }
+  return s;
+}
+// envoie un bloc et attend la fin de l'opération
+async function dnload(block,data){
+  await ctlOut(DFU.DNLOAD,block,data);
+  let s=await getStatus();
+  while(s.state===ST.DNBUSY){ await sleep(Math.max(s.poll,1)); s=await getStatus(); }
+  if(s.state===ST.ERROR||s.status!==0) throw new Error("La calculatrice a signalé une erreur (status "+s.status+", état "+s.state+")");
+}
+const cmd=(c,a)=>new Uint8Array([c,a&255,(a>>>8)&255,(a>>>16)&255,(a>>>24)&255]);
+const setPtr=a=>dnload(0,cmd(0x21,a));
+const erasePage=a=>dnload(0,cmd(0x41,a));
+
+function findAlt(addr,len){
+  for(const a of alts){ if(a.layout && addr>=a.layout.start && addr+len<=a.layout.end) return a; }
+  return null;
+}
+
+async function connect(){
+  try{
+    const d=await navigator.usb.requestDevice({filters:[{vendorId:0x0483,productId:0xdf11},{vendorId:0x0483,productId:0xa291}]});
+    await openDevice(d);
+  }catch(e){ if(e.name!=="NotFoundError") log("Connexion impossible : "+e.message,"l-bad"); }
+}
+async function openDevice(d){
+  dev=d; await dev.open();
+  if(dev.configuration===null) await dev.selectConfiguration(1);
+  // descripteur de configuration brut : sert à la taille de transfert ET aux noms de zones (iInterface)
+  let cfg=new Uint8Array(0);
+  try{ const r=await dev.controlTransferIn({requestType:"standard",recipient:"device",request:6,value:0x0200,index:0},4096); cfg=new Uint8Array(r.data.buffer,r.data.byteOffset,r.data.byteLength); }catch(e){}
+  const strIdx={}; // "iface/alt" -> index de chaîne
+  for(let i=0;i+9<=cfg.length;){ const l=cfg[i]; if(!l)break; if(cfg[i+1]===4) strIdx[cfg[i+2]+"/"+cfg[i+3]]=cfg[i+8]; i+=l; }
+  async function getStr(idx){
+    if(!idx) return "";
+    try{ const r=await dev.controlTransferIn({requestType:"standard",recipient:"device",request:6,value:0x0300|idx,index:0x0409},255);
+      if(r.status!=="ok"||r.data.byteLength<2) return "";
+      return new TextDecoder("utf-16le").decode(new Uint8Array(r.data.buffer,r.data.byteOffset+2,r.data.byteLength-2)); }catch(e){ return ""; }
+  }
+  alts=[]; ifaceNum=-1;
+  for(const itf of dev.configuration.interfaces){
+    for(const a of itf.alternates){
+      if(a.interfaceClass===0xFE && a.interfaceSubclass===0x01){
+        if(ifaceNum<0) ifaceNum=itf.interfaceNumber;
+        if(itf.interfaceNumber===ifaceNum){
+          let name=a.interfaceName||"";
+          if(!parseLayout(name)){ const n2=await getStr(strIdx[itf.interfaceNumber+"/"+a.alternateSetting]); if(n2) name=n2; }
+          let layout=parseLayout(name), guessed=false;
+          if(!layout && a.alternateSetting===0){ // repli : mémoire externe NumWorks (8 Mo, secteurs de 4 Ko)
+            layout=parseLayout("@Flash externe/0x90000000/2048*004Kg"); guessed=true;
+            log("Nom de zone illisible sur ce système : zone externe 0x90000000 supposée (valeur standard NumWorks).","l-warn");
+          }
+          alts.push({alt:a.alternateSetting,name,layout,guessed});
+        }
+      }
+    }
+  }
+  if(ifaceNum<0) throw new Error("Aucune interface DFU : la calculatrice n'est pas en mode DFU.");
+  await dev.claimInterface(ifaceNum);
+  transferSize=2048;
+  for(let i=0;i+9<=cfg.length;){ const l=cfg[i]; if(!l)break; if(cfg[i+1]===0x21 && l>=9){ transferSize=cfg[i+5]|(cfg[i+6]<<8); break; } i+=l; }
+  if(!transferSize||transferSize>4096) transferSize=2048;
+  const has9=alts.some(a=>a.layout&&a.layout.start===0x90000000);
+  $("devkv").innerHTML="";
+  const kv=(k,v)=>{ $("devkv").insertAdjacentHTML("beforeend",`<b>${k}</b><span class="mono"></span>`); $("devkv").lastElementChild.textContent=v; };
+  kv("Appareil",(dev.manufacturerName||"")+" "+(dev.productName||"")); kv("USB ID",hex(dev.vendorId).slice(6)+":"+hex(dev.productId).slice(6));
+  kv("N° de série",dev.serialNumber||"—"); kv("Transfert",transferSize+" octets");
+  alts.forEach(a=>kv("Zone "+a.alt, a.layout?`${a.layout.name} ${hex(a.layout.start)} → ${hex(a.layout.end)}`:(a.name||"?")));
+  kv("Slot suggéré",has9?"A (0x90010000)":"B (0x90410000)");
+  $("preset").value=has9?"0x90010000":"0x90410000"; $("addr").value=$("preset").value;
+  $("devinfo").hidden=false; $("btnForget").hidden=false; $("btnConnect").textContent="Changer de calculatrice…";
+  const model="N0"+dev.deviceVersionMajor.toString(16)+dev.deviceVersionMinor.toString(16)+dev.deviceVersionSubminor.toString(16);
+  kv("Modèle",model);
+  if(model!=="N0120") log("Attention : modèle "+model+" (CHED OS vise la N0120). Continue seulement si c'est voulu.","l-warn");
+  await toIdle();
+  log("Calculatrice connectée : "+(dev.productName||"DFU")+" — zones : "+alts.map(a=>a.layout?hex(a.layout.start):"?").join(", "),"l-ok");
+  $("c1").classList.add("done"); $("c2").classList.remove("off"); refresh();
+  if(EMBEDDED) await useEmbedded();
+}
+async function forget(){ try{ if(dev) await dev.close(); }catch(e){} dev=null; $("devinfo").hidden=true; $("btnForget").hidden=true; $("c1").classList.remove("done"); $("c2").classList.add("off"); $("c3").classList.add("off"); $("c4").classList.add("off"); $("btnConnect").textContent="Choisir la calculatrice…"; log("Déconnecté."); }
+
+// ---------- CHED OS intégré à la page ----------
+async function gunzipB64(b64){
+  const bytes=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
+  const st=new Blob([bytes]).stream().pipeThrough(new DecompressionStream("gzip"));
+  return new Uint8Array(await new Response(st).arrayBuffer());
+}
+async function useEmbedded(){
+  // comme le site officiel : le système officiel tourne sur l'autre emplacement, on écrit dans celui qui est libre
+  const has9=alts.some(a=>a.layout&&a.layout.start===0x90000000), slot=has9?"A":"B";
+  if(!EMBEDDED[slot]){ log("Pas de firmware CHED pour l'emplacement "+slot+".","l-bad"); return; }
+  const data=await gunzipB64(EMBEDDED[slot]);
+  $("addr").value=slot==="A"?"0x90010000":"0x90410000"; $("preset").value=$("addr").value;
+  log("Emplacement libre : "+slot+" — CHED OS prêt à être installé.","l-ok");
+  setImage("CHED OS (emplacement "+slot+")",data);
+}
+// ---------- fichiers ----------
+async function loadFile(f){
+  $("files").innerHTML=""; $("fileinfo").textContent=""; image=null; selName=null; zipBuf=null; zipEntries=[];
+  const buf=await f.arrayBuffer(); const lower=f.name.toLowerCase();
+  try{
+    if(lower.endsWith(".zip")){
+      zipBuf=buf; const all=listZip(buf); zipEntries=all.filter(e=>/\.(dfu|bin)$/i.test(e.name));
+      if(!zipEntries.length){
+        const nwa=all.filter(e=>/\.nwa$/i.test(e.name)).length;
+        throw new Error("Aucun .dfu ou .bin dans ce zip ("+all.length+" fichiers dont "+nwa+" .nwa). Un .nwa n'est pas un firmware flashable. Compile d'abord CHED OS (EXPORT_BIN.bat) : le .bin sera dans le dossier firmware/.");
+      }
+      const has9=alts.some(a=>a.layout&&a.layout.start===0x90000000), want=has9?"a":"b";
+      let rec=zipEntries.findIndex(e=>new RegExp("(^|[._\\-/])"+want+"[._\\-]","i").test(e.name.split("/").pop()));
+      zipEntries.forEach((e,i)=>{
+        const div=document.createElement("div"); div.className="file"; div.dataset.name=e.name;
+        div.innerHTML=`<span class="mono"></span>${i===rec?'<span class="tag rec">recommandé pour ton slot</span>':""}<span class="sz">${(e.usize/1024).toFixed(1)} Ko</span>`;
+        div.firstChild.textContent=e.name; div.onclick=()=>pick(e.name); $("files").appendChild(div);
+      });
+      log(`Zip ouvert : ${zipEntries.length} fichier(s) flashable(s).`);
+      pick(zipEntries[rec>=0?rec:0].name);
+    } else {
+      const data=new Uint8Array(buf); setImage(f.name,data);
+    }
+  }catch(e){ log("Fichier refusé : "+e.message,"l-bad"); $("fileinfo").textContent="❌ "+e.message; }
+}
+async function pick(name){
+  const e=zipEntries.find(x=>x.name===name); selName=name;
+  document.querySelectorAll(".file").forEach(d=>d.classList.toggle("sel",d.dataset.name===name));
+  try{ setImage(name,await readZipEntry(zipBuf,e)); }catch(err){ log("Lecture du zip : "+err.message,"l-bad"); image=null; refresh(); }
+}
+function setImage(name,data){
+  const els=data.length>5 && String.fromCharCode(...data.slice(0,5))==="DfuSe" ? parseDfuse(data.buffer.slice(data.byteOffset,data.byteOffset+data.byteLength)) : null;
+  image = els ? {kind:"dfuse",elements:els,name} : {kind:"bin",data,name};
+  $("fileinfo").textContent = els ? `${name} : fichier DfuSe, ${els.length} bloc(s), ${(els.reduce((s,e)=>s+e.data.length,0)/1024).toFixed(1)} Ko` : `${name} : image brute, ${(data.length/1024).toFixed(1)} Ko`;
+  log("Fichier prêt : "+$("fileinfo").textContent); refresh();
+}
+function currentElements(){
+  if(!image) return [];
+  if(image.kind==="dfuse") return image.elements;
+  const a=parseInt($("addr").value.trim(),16)>>>0;
+  return [{addr:a,data:image.data}];
+}
+function refresh(){
+  const ready=!!dev && !!image;
+  $("c3").classList.toggle("off",!ready); $("c4").classList.toggle("off",!ready);
+  $("binTarget").hidden=!(image&&image.kind==="bin"); $("dfuseInfo").hidden=!(image&&image.kind==="dfuse");
+  if(!ready) return;
+  const els=currentElements(); let html="", problems=[], risky=false;
+  if(image.kind==="dfuse") $("dfuseInfo").innerHTML="Adresses lues dans le fichier :<div class='mono'>"+els.map(e=>`${hex(e.addr)} → ${hex(e.addr+e.data.length)} (${(e.data.length/1024).toFixed(1)} Ko)`).join("<br>")+"</div>";
+  for(const e of els){
+    if(!e.data.length) continue;
+    if(!findAlt(e.addr,e.data.length)) problems.push(`${hex(e.addr)}–${hex(e.addr+e.data.length)} n'est dans aucune zone annoncée par la calculatrice.`);
+    if(e.addr<0x90000000) risky=true;
+  }
+  if(problems.length) html+=`<div class="warn bad">❌ ${problems.join("<br>")}<br>Flash bloqué : mauvaise calculatrice, mauvais slot ou mauvais fichier.</div>`;
+  if(risky) html+=`<div class="warn">⚠️ Une adresse est sous 0x90000000 (mémoire interne). Ne continue que si tu sais exactement ce que tu fais.</div>`;
+  $("risk").innerHTML=html; $("btnFlash").disabled=busy||problems.length>0||!$("ack").checked;
+}
+
+// ---------- flash ----------
+function setProg(done,total,txt){ $("pb").style.width=(total?100*done/total:0)+"%"; $("pt").textContent=txt||""; }
+async function flash(){
+  if(busy) return; busy=true; $("btnFlash").disabled=true;
+  const els=currentElements().filter(e=>e.data.length); const total=els.reduce((s,e)=>s+e.data.length,0); let done=0;
+  try{
+    await toIdle();
+    for(const e of els){
+      const a=findAlt(e.addr,e.data.length); if(!a) throw new Error("Adresse hors zone : "+hex(e.addr));
+      await dev.selectAlternateInterface(ifaceNum,a.alt); await toIdle();
+      const end=e.addr+e.data.length;
+      const sec=a.layout.sectors.filter(s=>s.start<end && s.start+s.size>e.addr);
+      if(sec.some(s=>!s.erase||!s.write)) throw new Error("Une partie de la zone n'est pas effaçable/écrivable.");
+      log(`Effacement de ${sec.length} secteur(s) à partir de ${hex(sec[0].start)}…`);
+      for(let i=0;i<sec.length;i++){ setProg(done,total,`Effacement ${i+1}/${sec.length}`); await erasePage(sec[i].start); }
+      log(`Écriture de ${e.data.length} octets à ${hex(e.addr)}…`);
+      for(let off=0;off<e.data.length;off+=transferSize){
+        const chunk=e.data.slice(off,Math.min(off+transferSize,e.data.length));
+        await setPtr(e.addr+off); await dnload(2,chunk);
+        done+=chunk.length; setProg(done,total,`Écriture ${(100*done/total).toFixed(0)} % (${(done/1024).toFixed(0)} / ${(total/1024).toFixed(0)} Ko)`);
+      }
+    }
+    setProg(total,total,"Flash terminé.");
+    log("Flash terminé avec succès.","l-ok");
+    if($("leave").checked){
+      log("Redémarrage sur le nouveau firmware…");
+      try{ await toIdle(); await setPtr(els[0].addr); await ctlOut(DFU.DNLOAD,2,new Uint8Array(0)); await getStatus(); }catch(e){}
+      try{ await dev.close(); }catch(e){}
+      dev=null; $("c1").classList.remove("done"); $("devinfo").hidden=true; $("btnForget").hidden=true; $("btnConnect").textContent="Choisir la calculatrice…"; $("c2").classList.add("off"); $("c3").classList.add("off"); $("c4").classList.add("off");
+      log("La calculatrice redémarre. Tu peux la débrancher.","l-ok");
+    }
+  }catch(e){ log("ÉCHEC : "+e.message,"l-bad"); setProg(0,1,"Échec : "+e.message); }
+  busy=false; refresh();
+}
+
+// ---------- UI ----------
+if(!("usb" in navigator)){ $("unsupported").hidden=false; $("btnConnect").disabled=true; }
+else {
+  navigator.usb.addEventListener("disconnect",e=>{ if(dev&&e.device===dev && !busy){ dev=null; log("Calculatrice débranchée.","l-warn"); $("c1").classList.remove("done"); $("devinfo").hidden=true; $("btnForget").hidden=true; $("c2").classList.add("off"); $("c3").classList.add("off"); $("c4").classList.add("off"); } });
+  navigator.usb.getDevices().then(l=>{ const d=l.find(x=>x.vendorId===0x0483); if(d) openDevice(d).catch(()=>{}); });
+}
+$("btnConnect").onclick=connect; $("btnForget").onclick=forget;
+$("file").onchange=e=>e.target.files[0]&&loadFile(e.target.files[0]);
+const drop=$("drop");
+["dragenter","dragover"].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.add("over");}));
+["dragleave","drop"].forEach(t=>drop.addEventListener(t,e=>{e.preventDefault();drop.classList.remove("over");}));
+drop.addEventListener("drop",e=>{ if(e.dataTransfer.files[0]) loadFile(e.dataTransfer.files[0]); });
+drop.addEventListener("click",e=>{ if(e.target.tagName!=="INPUT") $("file").click(); });
+$("preset").onchange=()=>{ if($("preset").value!=="custom") $("addr").value=$("preset").value; refresh(); };
+$("addr").oninput=refresh; $("ack").onchange=refresh; $("btnFlash").onclick=flash;
+$("btnLog").onclick=()=>{ const a=document.createElement("a"); a.href=URL.createObjectURL(new Blob([logText],{type:"text/plain"})); a.download="ched_flasher_log.txt"; a.click(); };
+if(EMBEDDED){
+  $("c2").querySelector("h2").innerHTML='<span class="num">2</span> CHED OS est inclus dans cette page';
+  $("drop").hidden=true; $("btnFlash").textContent="Installer CHED OS";
+}
+log("Prêt. Étape 1 : choisis ta calculatrice (mode DFU).");
+</script>
+</body>
+</html>
