@@ -1,10 +1,6 @@
-# NumScreen : ton ordinateur dans ta NumWorks
+# Numpack :Une nouvelle expérience
 
-**NumScreen affiche l'écran de ton ordinateur sur une calculatrice NumWorks, et
-la calculatrice devient sa souris et son clavier.** Branche-la en USB à un Mac
-ou à un PC Windows : tu vois l'écran, tu bouges la souris avec les flèches, tu
-cliques avec `OK` et tu tapes avec les touches de la calculatrice. Et tu peux
-même jouer, à Roblox par exemple.
+**numpack est inspirer du code de @derim00 , .gg/sti2D.
 
 - Écran de l'ordinateur en 320×200, à environ 15 images/s, avec le curseur
 - Souris aux flèches : un appui court pour la précision, maintenue elle accélère
@@ -13,7 +9,7 @@ même jouer, à Roblox par exemple.
 - Les touches maintenues sur la calculatrice restent maintenues sur l'ordinateur
 - **Mode jeu** : les flèches deviennent celles du clavier et `OK` saute ;
   `var` met `Z` `Q` `S` `D` sur `8` `4` `5` `6` pour jouer en AZERTY
-- Mac et Windows, sans pilote à installer
+- Numcam permet de profiter d'une caméra sur la numworks
 
 NumScreen fait partie de **[NumSocial](https://github.com/derim00/numsocial)** :
 le même firmware contient aussi **[NumTube](https://github.com/derim00/numtube)**
